@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Otimizador de Rotas</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <link rel="stylesheet" type="text/css" href="RO.css">
+</head>
+<body>
+  <h1>Otimizador de Rotas</h1>
+  <p>Digite uma coordenada por linha:</p>
+  <textarea id="addressList"></textarea>
+  <br />
+  <button onclick="generateRoute()">Gerar Rota</button>
+  <a id="exportLink" href="#" target="_blank">Exportar</a>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script>
+    const map = L.map('map').setView([-23.55052, -46.633308], 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap'
+    }).addTo(map);
+
+    async function geocode(address) {
+      const baseUrl = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=br&q=';
+      let url = baseUrl + encodeURIComponent(address);
+      let response = await fetch(url);
+      let data = await response.json();
+
+      // Se falhar, tenta remover número e CEP
+      if (!data[0]) {
+        const reduced = address.replace(/\d{5}-\d{3}/, '').replace(/\d+/, '').trim();
+        url = baseUrl + encodeURIComponent(reduced);
+        response = await fetch(url);
+        data = await response.json();
+      }
+
+      if (data[0]) {
+        return {
+          lat: parseFloat(data[0].lat),
+          lon: parseFloat(data[0].lon),
+          display_name: data[0].display_name
+        };
+      } else {
+        return null;
+      }
+    }
+
+    function calculateDistance(a, b) {
+      const dx = a[0] - b[0];
+      const dy = a[1] - b[1];
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    function tspNearestNeighbor(points) {
+      const visited = new Array(points.length).fill(false);
+      const route = [0];
+      visited[0] = true;
+
+      for (let i = 1; i < points.length; i++) {
+        let last = route[route.length - 1];
+        let nearest = -1;
+        let nearestDist = Infinity;
+
+        for (let j = 0; j < points.length; j++) {
+          if (!visited[j]) {
+            const dist = calculateDistance(points[last], points[j]);
+            if (dist < nearestDist) {
+              nearest = j;
+              nearestDist = dist;
+            }
+          }
+        }
+
+        route.push(nearest);
+        visited[nearest] = true;
+      }
+      return route;
+    }
+
+    async function generateRoute() {
+      const addresses = document.getElementById("addressList").value.trim().split("\n");
+      const coords = [];
+      const originals = [];
+
+      for (const addr of addresses) {
+        const result = await geocode(addr);
+        if (result) {
+          coords.push([result.lat, result.lon]);
+          originals.push(result);
+        } else {
+          alert(`Endereço não encontrado: ${addr}`);
+          return;
+        }
+      }
+
+      const routeOrder = tspNearestNeighbor(coords);
+      const orderedCoords = routeOrder.map(i => coords[i]);
+      const orderedAddresses = routeOrder.map(i => addresses[i]);
+
+      map.eachLayer(layer => {
+        if (layer instanceof L.Marker || layer instanceof L.Polyline) {
+          map.removeLayer(layer);
+        }
+      });
+
+      orderedCoords.forEach(c => L.marker(c).addTo(map));
+      L.polyline(orderedCoords, { color: 'blue' }).addTo(map);
+      map.fitBounds(L.polyline(orderedCoords).getBounds());
+
+      const exportLink = document.getElementById("exportLink");
+      const googleMapsURL = `https://www.google.com/maps/dir/` + orderedAddresses.map(a => encodeURIComponent(a.trim())).join("/");
+      exportLink.href = googleMapsURL;
+      exportLink.textContent = "Exportar";
+    }
+  </script>
+</body>
+</html>
